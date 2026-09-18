@@ -1,5 +1,10 @@
 # xclip-shim — fix image paste (Alt+V) for AI CLIs on WSL2 distros with broken interop
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Shell](https://img.shields.io/badge/language-Shell-89e051.svg)](xclip)
+[![Platform](https://img.shields.io/badge/platform-WSL2%20%2B%20WSLg-blue)](https://github.com/microsoft/wslg)
+[![shellcheck](https://github.com/game1991/wslg-xclip-shim/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/game1991/wslg-xclip-shim/actions/workflows/shellcheck.yml)
+
 AI CLI tools with image-paste support (Claude Code, Kscc Code, and other
 Claude-Code-style agents) read clipboard images through `xclip`:
 
@@ -21,6 +26,16 @@ the AI never sees your screenshot.
 
 **xclip-shim fixes this with zero dependencies on interop and zero background
 processes**, by borrowing the clipboard sync that WSLg already provides.
+
+## Demo
+
+**Before** — interop broken, every Windows executable fails, paste silently does nothing:
+
+![interop broken](screenshots/broken-interop.png)
+
+**After** — screenshot → Alt+V → the image lands in the AI CLI prompt:
+
+![paste works](screenshots/alt-v-paste.png)
 
 ## How it works
 
@@ -51,9 +66,9 @@ Key facts this relies on:
 ## Install
 
 ```bash
-git clone https://github.com/<you>/wslg-xclip-shim.git
+git clone https://github.com/game1991/wslg-xclip-shim.git
 cd wslg-xclip-shim
-./install.sh
+sudo ./install.sh
 ```
 
 The installer checks your environment (WSL2 + WSLg socket), installs missing
@@ -85,13 +100,37 @@ CLI** — the image should appear in the prompt.
 | XWayland clipboard | partial | WSLg syncs **text** through X11 but not images |
 | Wayland socket (`wl-paste`) | ✓ | this is exactly what the shim uses |
 
+## FAQ
+
+**Does the clipboard sync keep working while interop is broken?**
+Yes — that is the whole point. WSLg's `wslgclipboardd` mirrors the Windows
+clipboard over its own channel (`/mnt/wslg/runtime-dir/wayland-0`), which never
+touches the interop sockets that are failing with `connect failed 13`.
+
+**How is this different from `wslu` / `win32yank`?**
+Both ultimately launch Windows executables, which is exactly what's broken on
+these distros. This shim never executes a Windows binary — see the comparison
+table above.
+
+**Does it break normal text clipboard access in the terminal?**
+No. Only image reads (`-t image/*`) are intercepted; everything else —
+including text paste/copy through the real `xclip` — passes straight through.
+
+**Does it work on regular (Microsoft Store / inbox) distros?**
+Yes, it works there too — but they don't need it; `xclip` + interop already
+works. The shim matters on custom-imported images.
+
+**Do I need a running X server / XWayland?**
+No. The shim talks Wayland directly and does not depend on X11 clipboard sync
+(which doesn't carry images on WSLg anyway).
+
 ## Scope & limitations
 
 - Linux side needs `wl-clipboard` and ImageMagick (`convert`).
 - The shim targets read-side clipboard image access (`-o`), which is what AI
   CLI image paste uses; writes and other exotic xclip flags are passed
   through to the real xclip.
-- Tested with: WSL 2.6.3 / WSLg 1.0.71 / a custom CentOS 7.9 import; should
+- Tested with: WSL 2.6.3 / WSLg 1.0.71 / a custom CentOS 7.8 import; should
   work on any distro where `/mnt/wslg` exists.
 
 ## License
