@@ -1,0 +1,79 @@
+#!/bin/zsh
+# xclip-shim: clipboard bridge for AI CLI image paste on WSL2 custom distros
+#
+# Problem: AI CLI tools (Claude Code and forks) read clipboard images via
+# `xclip -selection clipboard -t TARGETS/-t image/png -o`. On WSL2 distros
+# where Windows interop is broken (common with custom-imported distros whose
+# PID 1 is not Microsoft's /init), that chain fails and image paste (Alt+V)
+# silently does nothing.
+#
+# Solution: WSLg (built into WSL2) syncs the Windows clipboard in real time
+# through a Wayland socket -- independent of interop. This shim serves
+# clipboard-image requests from wl-paste (converting BMP to PNG on the fly,
+# since Windows puts screenshots on the clipboard as image/bmp) and passes
+# everything else through to the real xclip.
+#
+# Install location: /usr/local/bin/xclip (shadows /usr/bin/xclip via PATH).
+
+export WAYLAND_DISPLAY="${WSLG_WAYLAND_DISPLAY:-/mnt/wslg/runtime-dir/wayland-0}"
+export XDG_RUNTIME_DIR="${WSLG_XDG_RUNTIME_DIR:-/mnt/wslg}"
+
+# locate wl-paste (wl-clipboard package)
+WLPASTE="${WSLG_WLPASTE:-$(command -v wl-paste || echo /usr/local/bin/wl-paste)}"
+REAL_XCLIP="${REAL_XCLIP:-/usr/bin/xclip}"
+
+# passthrough helper
+passthrough() { exec "$REAL_XCLIP" "${(@)rest}"; }
+
+target=""
+local -a rest
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -t|-target) target="$2"; shift 2 ;;
+    *) rest+=("$1"); shift ;;
+  esac
+done
+
+types_now=$("$WLPASTE" --list-types 2>/dev/null)
+has_img=$(echo "$types_now" | grep -E '^image/(png|bmp|jpeg|jpg|gif|webp)$' | head -1)
+
+case "$target" in
+  TARGETS|target)
+    # clipboard capability probe used by AI CLIs to detect an image
+    if [[ -n "$has_img" ]]; then
+      echo "image/png"; echo "image/bmp"
+    else
+      passthrough -t TARGETS -o
+    fi
+    ;;
+  image/png)
+    if echo "$types_now" | grep -q '^image/png$'; then
+      "$WLPASTE" --type image/png
+    elif [[ -n "$has_img" ]]; then
+      # Windows screenshots land on the clipboard as image/bmp; convert live
+      "$WLPASTE" --type "$has_img" | convert - png:- 2>/dev/null
+    else
+      passthrough -t image/png -o
+    fi
+    ;;
+  image/bmp|image/jpeg|image/jpg|image/gif|image/webp)
+    if echo "$types_now" | grep -q "^$target\$"; then
+      "$WLPASTE" --type "$target"
+    elif [[ -n "$has_img" ]]; then
+      "$WLPASTE" --type "$has_img" | convert - png:- 2>/dev/null
+    else
+      passthrough -t "$target" -o
+    fi
+    ;;
+  "")
+    # no -t given: serve image for read requests, otherwise passthrough
+    if [[ -n "$has_img" ]] && [[ "${rest[(r)-o]}" == "-o" ]]; then
+      "$WLPASTE" --type "$has_img"
+    else
+      passthrough
+    fi
+    ;;
+  *)
+    exec "$REAL_XCLIP" "${(@)rest}" -t "$target"
+    ;;
+esac
