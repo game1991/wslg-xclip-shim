@@ -12,4 +12,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run shellcheck
         run: |
-          shellcheck -S error xclip install.sh uninstall.sh
+          # xclip is a zsh script (shellcheck doesn't support zsh) — check the bash scripts only
+          shellcheck -S error install.sh uninstall.sh
